@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/drone/drone/core"
@@ -22,12 +23,14 @@ import (
 func Handler(
 	repos core.RepositoryStore,
 	builds core.BuildStore,
+	stages core.StageStore,
 ) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		namespace := chi.URLParam(r, "owner")
 		name := chi.URLParam(r, "name")
 		ref := r.FormValue("ref")
 		branch := r.FormValue("branch")
+		stage := r.FormValue("stage")
 		if branch != "" {
 			ref = "refs/heads/" + branch
 		}
@@ -52,6 +55,39 @@ func Handler(
 		build, err := builds.FindRef(r.Context(), repo.ID, ref)
 		if err != nil {
 			io.WriteString(w, badgeNone)
+			return
+		}
+
+		if stage != "" {
+			stageNumber, err := strconv.Atoi(stage)
+
+			if err != nil {
+				io.WriteString(w, badgeNone)
+				return
+			}
+
+			stage, err := stages.List(r.Context(), build.ID)
+
+			if err != nil {
+				io.WriteString(w, badgeNone)
+				return
+			}
+
+			if len(stage) < stageNumber-1 || stageNumber-1 < 0 {
+				io.WriteString(w, badgeNone)
+				return
+			}
+
+			switch stage[stageNumber-1].Status {
+			case core.StatusPending, core.StatusRunning, core.StatusBlocked:
+				io.WriteString(w, badgeStarted)
+			case core.StatusPassing:
+				io.WriteString(w, badgeSuccess)
+			case core.StatusError:
+				io.WriteString(w, badgeError)
+			default:
+				io.WriteString(w, badgeFailure)
+			}
 			return
 		}
 
